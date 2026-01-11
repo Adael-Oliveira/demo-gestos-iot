@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8">
+  <title>Controle por Gestos</title>
+</head>
+<body>
+  <h2>Controle Ativo</h2>
+  <video id="video" autoplay playsinline></video>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+
+  <script>
+    const supabaseUrl = "https://hrpxkhkvzlpucezxxvrz.supabase.co";
+    const supabaseKey = "sb_publishable_WLtXjBJsU6LKHtiAmCQFhw_cjZ-m7tQ";
+    const supabase = supabase.createClient(supabaseUrl, supabaseKey);
+
+    const videoElement = document.getElementById("video");
+
+    navigator.mediaDevices.getUserMedia({ video: true })
+      .then(stream => videoElement.srcObject = stream);
+
+    const hands = new Hands({
+      locateFile: file =>
+        `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+    });
+
+    hands.setOptions({
+      maxNumHands: 1,
+      minDetectionConfidence: 0.7,
+      minTrackingConfidence: 0.7
+    });
+
+    hands.onResults(async results => {
+      if (!results.multiHandLandmarks) return;
+
+      const landmarks = results.multiHandLandmarks[0];
+
+      const dedoAberto =
+        landmarks[8].y < landmarks[6].y &&
+        landmarks[12].y < landmarks[10].y;
+
+      await supabase
+        .from("estado_rele")
+        .upsert({ id: 1, ligado: dedoAberto });
+    });
+
+    const camera = new Camera(videoElement, {
+      onFrame: async () => {
+        await hands.send({ image: videoElement });
+      },
+      width: 640,
+      height: 480
+    });
+
+    camera.start();
+  </script>
+</body>
+</html>
