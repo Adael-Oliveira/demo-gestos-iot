@@ -1,82 +1,168 @@
 <!DOCTYPE html>
-<html lang="pt-BR">
+<html lang="pt-br">
 <head>
-  <meta charset="UTF-8">
-  <title>Controle por Gestos</title>
+<meta charset="UTF-8" />
+<title>Controle por Gestos</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+<!-- MediaPipe -->
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+
+<!-- Supabase -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+<style>
+body {
+  background: #111;
+  color: #fff;
+  font-family: Arial, sans-serif;
+  text-align: center;
+  padding: 10px;
+}
+
+video {
+  width: 90%;
+  max-width: 420px;
+  border-radius: 12px;
+  border: 2px solid #00c853;
+}
+
+#status {
+  margin-top: 12px;
+  font-size: 18px;
+}
+
+#timer {
+  font-size: 22px;
+  margin-top: 8px;
+  color: #00e676;
+}
+</style>
 </head>
 
 <body>
-  <h2>Controle por Gestos</h2>
-  <video id="video" autoplay></video>
 
-  <script>
-    const SUPABASE_URL = "https://hrpxkhkvzlpucezxxvrz.supabase.co";
-    const SUPABASE_KEY = "sb_publishable_WLtXjBJsU6LKHtiAmCQFhw_cjZ-m7tQ";
+<h2>✋ Controle por Gestos</h2>
+<p>Mão aberta = LIGA | Mão fechada = DESLIGA</p>
 
-    const video = document.getElementById("video");
-    const userId = new URLSearchParams(window.location.search).get("user");
+<video id="video" autoplay playsinline></video>
 
-    async function atualizarRele(estado) {
-      await fetch(`${SUPABASE_URL}/rest/v1/estado_rele`, {
-        method: "POST",
-        headers: {
-          "apikey": SUPABASE_KEY,
-          "Authorization": `Bearer ${SUPABASE_KEY}`,
-          "Content-Type": "application/json",
-          "Prefer": "resolution=merge-duplicates"
-        },
-        body: JSON.stringify({ id: 1, ligado: estado })
-      });
-    }
+<div id="status">Inicializando...</div>
+<div id="timer">⏳ 15</div>
 
-    const hands = new Hands({
-      locateFile: file =>
-        `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
-    });
+<script>
+// =================== SUPABASE ===================
+const SUPABASE_URL = "https://hrpxkhkvzlpucezxxvrz.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_WLtXjBJsU6LKHtiAmCQFhw_cjZ-m7tQ";
 
-    hands.setOptions({
-      maxNumHands: 1,
-      modelComplexity: 1,
-      minDetectionConfidence: 0.7,
-      minTrackingConfidence: 0.7
-    });
+const sb = supabase.createClient(
+  SUPABASE_URL,
+  SUPABASE_ANON_KEY
+);
 
-    hands.onResults(results => {
-      if (!results.multiHandLandmarks) return;
+// =================== SESSION ===================
+const session_id = localStorage.getItem("session_id");
 
-      const mao = results.multiHandLandmarks[0];
-      const polegar = mao[4].y;
-      const indicador = mao[8].y;
+if (!session_id) {
+  alert("Sessão inválida. Retornando para a fila.");
+  window.location.href = "index.html";
+}
 
-      if (indicador < polegar) {
-        atualizarRele(true);   // mão aberta
-      } else {
-        atualizarRele(false);  // mão fechada
-      }
-    });
+// =================== TIMER ===================
+let tempo = 15;
+const timerEl = document.getElementById("timer");
 
-    const camera = new Camera(video, {
-      onFrame: async () => {
-        await hands.send({ image: video });
-      },
-      width: 640,
-      height: 480
-    });
+const timerInterval = setInterval(async () => {
+  tempo--;
+  timerEl.innerText = "⏳ " + tempo;
 
-    camera.start();
+  if (tempo <= 0) {
+    clearInterval(timerInterval);
 
-    window.onbeforeunload = async () => {
-      await fetch(`${SUPABASE_URL}/rest/v1/fila?user_id=eq.${userId}`, {
-        method: "DELETE",
-        headers: {
-          "apikey": SUPABASE_KEY,
-          "Authorization": `Bearer ${SUPABASE_KEY}`
-        }
-      });
-    };
-  </script>
+    await sb.from("fila")
+      .delete()
+      .eq("session_id", session_id);
+
+    window.location.href = "index.html";
+  }
+}, 1000);
+
+// Remove da fila ao fechar / atualizar
+window.addEventListener("beforeunload", async () => {
+  await sb.from("fila")
+    .delete()
+    .eq("session_id", session_id);
+});
+
+// =================== MEDIA PIPE ===================
+const video = document.getElementById("video");
+const statusEl = document.getElementById("status");
+
+let estadoAtual = null;
+let ultimoComando = 0;
+
+const hands = new Hands({
+  locateFile: file =>
+    `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+});
+
+hands.setOptions({
+  maxNumHands: 1,
+  minDetectionConfidence: 0.7,
+  minTrackingConfidence: 0.7
+});
+
+hands.onResults(async results => {
+  if (!results.multiHandLandmarks) return;
+
+  const p = results.multiHandLandmarks[0];
+
+  const maoAberta =
+    p[8].y < p[6].y &&
+    p[12].y < p[10].y &&
+    p[16].y < p[14].y &&
+    p[20].y < p[18].y;
+
+  const agora = Date.now();
+  if (agora - ultimoComando < 1200) return;
+
+  if (maoAberta && estadoAtual !== true) {
+    estadoAtual = true;
+    ultimoComando = agora;
+
+    statusEl.innerText = "✋ MÃO ABERTA → LIGANDO";
+
+    await sb.from("estado_rele")
+      .update({ estado: true })
+      .eq("id", 1);
+  }
+
+  if (!maoAberta && estadoAtual !== false) {
+    estadoAtual = false;
+    ultimoComando = agora;
+
+    statusEl.innerText = "✊ MÃO FECHADA → DESLIGANDO";
+
+    await sb.from("estado_rele")
+      .update({ estado: false })
+      .eq("id", 1);
+  }
+});
+
+// =================== CAMERA ===================
+const camera = new Camera(video, {
+  onFrame: async () => {
+    await hands.send({ image: video });
+  },
+  width: 640,
+  height: 480
+});
+
+camera.start().then(() => {
+  statusEl.innerText = "Câmera ativa. Faça o gesto!";
+});
+</script>
+
 </body>
 </html>
