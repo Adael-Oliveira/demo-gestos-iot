@@ -1,40 +1,50 @@
 <!DOCTYPE html>
-<html lang="pt-br">
+<html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
   <title>Fila de Espera</title>
 </head>
 <body>
-  <h2 id="status">Entrando na fila...</h2>
+  <h2>Entrando na fila...</h2>
 
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script>
-    const supabaseUrl = "https://hrpxkhkvzlpucezxxvrz.supabase.co";
-    const supabaseKey = "sb_publishable_WLtXjBJsU6LKHtiAmCQFhw_cjZ-m7tQ";
-    const supabase = supabase.createClient(supabaseUrl, supabaseKey);
-
-    const userId = crypto.randomUUID();
+    const SUPABASE_URL = "https://hrpxkhkvzlpucezxxvrz.supabase.co";
+    const SUPABASE_KEY = "sb_publishable_WLtXjBJsU6LKHtiAmCQFhw_cjZ-m7tQ";
 
     async function entrarNaFila() {
-      await supabase
-        .from("fila")
-        .insert([{ user_id: userId, ativo: true }]);
+      const userId = crypto.randomUUID();
 
-      verificarFila();
+      await fetch(`${SUPABASE_URL}/rest/v1/fila`, {
+        method: "POST",
+        headers: {
+          "apikey": SUPABASE_KEY,
+          "Authorization": `Bearer ${SUPABASE_KEY}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ user_id: userId })
+      });
+
+      verificarFila(userId);
     }
 
-    async function verificarFila() {
-      const { data } = await supabase
-        .from("fila")
-        .select("*")
-        .eq("ativo", true)
-        .order("created_at", { ascending: true });
+    async function verificarFila(userId) {
+      setInterval(async () => {
+        const res = await fetch(
+          `${SUPABASE_URL}/rest/v1/fila?select=*&order=created_at.asc`,
+          {
+            headers: {
+              "apikey": SUPABASE_KEY,
+              "Authorization": `Bearer ${SUPABASE_KEY}`
+            }
+          }
+        );
 
-      if (data && data.length > 0 && data[0].user_id === userId) {
-        window.location.href = "controle.html";
-      } else {
-        setTimeout(verificarFila, 2000);
-      }
+        const fila = await res.json();
+
+        if (fila.length > 0 && fila[0].user_id === userId) {
+          window.location.href = "controle.html?user=" + userId;
+        }
+      }, 2000);
     }
 
     entrarNaFila();
